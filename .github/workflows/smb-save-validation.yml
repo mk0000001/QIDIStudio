@@ -1,0 +1,61 @@
+name: SMB save validation
+
+on:
+  push:
+    branches: [ci/smb-save-validation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  focused-tests:
+    name: Recent-project refresh tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure actual production policy and bundled Catch2 tests
+        run: cmake -S .github/smb-validation -B build-smb-tests
+      - name: Build
+        run: cmake --build build-smb-tests --config Release --parallel 2
+      - name: Test
+        run: ctest --test-dir build-smb-tests -C Release --output-on-failure
+      - name: Upload Windows diagnostics (not the QIDI application)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: qidi-smb-windows-diagnostics
+          path: build-smb-tests/Release/*.exe
+
+  windows-app:
+    name: Windows application prerequisites and build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check published full-application inputs
+        run: cmake -P .github/smb-validation/check-app-inputs.cmake
+      - name: Install build utilities
+        run: choco install pkgconfiglite strawberryperl nsis --yes --no-progress
+      - name: Build upstream dependencies
+        shell: pwsh
+        run: |
+          cmake -S deps -B build-deps -G 'Visual Studio 17 2022' -A x64 "-DDESTDIR=$pwd/deps-out" -DCMAKE_BUILD_TYPE=Release -DDEP_DEBUG=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build-deps --config Release --parallel 2
+      - name: Configure full application
+        shell: pwsh
+        run: |
+          $sdk = (Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/Include' -Directory |
+            Where-Object Name -Match '^10\.' | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          cmake -S . -B build-app -G 'Visual Studio 17 2022' -A x64 -DQDT_RELEASE_TO_PUBLIC=0 -DQDT_INTERNAL_TESTING=0 "-DCMAKE_PREFIX_PATH=$pwd/deps-out/usr/local" "-DCMAKE_INSTALL_PREFIX=$pwd/install-dir" "-DWIN10SDK_PATH=$sdk"
+      - name: Build complete Windows application
+        run: cmake --build build-app --target install --config Release --parallel 4
+      - name: Upload built application
+        uses: actions/upload-artifact@v6
+        with:
+          name: qidi-smb-windows-application
+          path: install-dir
