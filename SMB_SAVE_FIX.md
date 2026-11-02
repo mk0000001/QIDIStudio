@@ -3,6 +3,7 @@
 숨겨진 홈 화면이 3MF 저장 때마다 최근 프로젝트 전체의 파일 시각을 조회하던 경로를 보류·병합하는 소스 패치입니다. Bambu 수정과 같은 원인을 QIDI `02.07.02.73`에서 확인하고 필요한 부분만 옮겼습니다.
 
 - [제품 패치](https://github.com/mk0000001/QIDIStudio/tree/fix/smb-save-recent-refresh)
+- [공식 편입 검토 PR #255 — Ready for review](https://github.com/QIDITECH/QIDIStudio/pull/255)
 - [Windows/Linux 회귀 테스트와 앱 빌드 사전 검사](https://github.com/mk0000001/QIDIStudio/actions/runs/41508902641)
 - [원인·측정·검증 결과와 제한](docs/superpowers/investigations/2026-11-03-qidi-smb-validation.md)
 - [설계](docs/superpowers/specs/2026-11-03-qidi-smb-save.md) · [계획](docs/superpowers/plans/2026-11-03-qidi-smb-save.md)

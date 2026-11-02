@@ -6,6 +6,8 @@ The five-file source patch is published at [fix/smb-save-recent-refresh](https:/
 
 Both Windows and Linux focused regression jobs passed in [validation run 41508902641](https://github.com/mk0000001/QIDIStudio/actions/runs/41508902641). **No patched QIDI GUI executable has been built or released.** The Windows application job failed its published-input preflight; application compilation and packaging were skipped. Native patched GUI tests therefore remain blocked.
 
+[Upstream PR #255](https://github.com/QIDITECH/QIDIStudio/pull/255) is open and Ready for review, with five product files only. Its description requests beta/official-release consideration after validation, the missing vendor inputs or a maintainer build, and upstream CI approval. [Upstream workflow 41509559236](https://github.com/QIDITECH/QIDIStudio/actions/runs/41509559236) currently requires maintainer approval (`action_required`); this is distinct from the fork's reproducible missing-input failure. No merge or release inclusion is claimed.
+
 ## Matched source and diagnosis
 
 - Official upstream: `QIDITECH/QIDIStudio`, main `403b619d56147160bb883e94f95a7951245bc6d0`, source and installed application version `02.07.02.73`.
