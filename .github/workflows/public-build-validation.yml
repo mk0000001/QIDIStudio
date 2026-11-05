@@ -27,9 +27,9 @@ jobs:
           version: 3.31.6
       - name: Install build utilities
         run: choco install pkgconfiglite strawberryperl nsis --yes --no-progress
-      - name: Cache QIDI-specific dependencies
+      - name: Restore QIDI-specific dependencies
         id: deps-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: qidi-deps
           key: qidi-public-windows-2022-vs17-release-${{ hashFiles('deps/**') }}
@@ -42,6 +42,36 @@ jobs:
       - name: Build QIDI dependencies from this repository manifest
         if: steps.deps-cache.outputs.cache-hit != 'true'
         run: cmake --build build-deps --config Release --parallel 2
+      - name: Record and package complete QIDI dependency prefix before application build
+        shell: pwsh
+        run: |
+          $tree = (git rev-parse HEAD:deps).Trim()
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if ($tree -ne 'e197a5df6940e61f93d060e15d83e189c89a423a') { throw 'Unexpected QIDI dependency manifest; update artifact contract deliberately' }
+          if (-not (Test-Path qidi-deps/usr/local/include/boost/version.hpp)) { throw 'Dependency prefix is missing' }
+          git rev-parse HEAD | Set-Content dependency-source.txt
+          $tree | Add-Content dependency-source.txt
+          cmake --version | Add-Content dependency-source.txt
+          'windows-2022; Visual Studio 17 2022; x64; Release; DEP_DEBUG=OFF' | Add-Content dependency-source.txt
+          Compress-Archive -Path qidi-deps -DestinationPath QIDI-Windows-dependencies-e197a5df.zip
+          Get-FileHash QIDI-Windows-dependencies-e197a5df.zip -Algorithm SHA256 | Format-List | Out-File dependency-sha256.txt
+      - name: Upload complete dependency prefix independently of app success
+        uses: actions/upload-artifact@v6
+        with:
+          name: qidi-windows-dependencies-e197a5df
+          path: |
+            QIDI-Windows-dependencies-e197a5df.zip
+            dependency-source.txt
+            dependency-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Save completed dependencies immediately
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: qidi-deps
+          key: ${{ steps.deps-cache.outputs.cache-primary-key }}
       - name: Capture baseline missing-source failure
         shell: pwsh
         run: |
@@ -75,7 +105,14 @@ jobs:
           cmake -S . -B build-public -G 'Visual Studio 17 2022' -A x64 -DQDT_RELEASE_TO_PUBLIC=0 -DQDT_INTERNAL_TESTING=0 -DSLIC3R_BUILD_TESTS=ON "-DCMAKE_PREFIX_PATH=$pwd/qidi-deps/usr/local" "-DCMAKE_INSTALL_PREFIX=$pwd/install-public" -DCMAKE_BUILD_TYPE=Release "-DWIN10SDK_PATH=$sdk"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Compile application and project tests
-        run: cmake --build build-public --target install --config Release --parallel 2
+        shell: pwsh
+        run: |
+          cmake --build build-public --target install --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger '/fileloggerparameters:logfile=app-build.log;verbosity=minimal'
+          $buildResult = $LASTEXITCODE
+          if (Test-Path app-build.log) {
+            Select-String -Path app-build.log -Pattern 'error (C\d+|LNK\d+|MSB\d+)|fatal error' | ForEach-Object Line | Set-Content app-build-errors.txt
+          }
+          exit $buildResult
       - name: Run project tests
         run: ctest --test-dir build-public -C Release --output-on-failure --parallel 2
       - name: Package developer app with limitations
@@ -98,10 +135,13 @@ jobs:
             baseline-configure.log
             build-public/Testing/Temporary/LastTest.log
             package-sha256.txt
+            app-build.log
+            app-build-errors.txt
+            dependency-source.txt
+            dependency-sha256.txt
           if-no-files-found: warn
       - name: Upload successful developer application
         uses: actions/upload-artifact@v6
         with:
           name: QIDIStudio-public-developer-Windows-x64
           path: QIDIStudio-public-developer-Windows-x64.zip
-

@@ -1217,6 +1217,7 @@ void WebViewPanel::SendDesignStaffpick(bool on)
 // cj_5: Fetch QIDI Maker model list instead of MakerWorld StaffPick
 void WebViewPanel::SendQidiModelList(bool on)
 {
+#if QDT_RELEASE_TO_PUBLIC
     static long long QidiModelListMs = 0;
 
     auto      now       = std::chrono::system_clock::now();
@@ -1276,6 +1277,13 @@ void WebViewPanel::SendQidiModelList(bool on)
     }
 
     m_has_pending_staff_pick = false;
+#else
+    // The QIDI Maker client is not included in this developer build.
+    (void)on;
+    m_has_pending_staff_pick = false;
+    m_online_type.clear();
+    SetLeftMenuShow("online", 0);
+#endif
 }
 
 void WebViewPanel::get_wiki_search_result(std::string keyword)
