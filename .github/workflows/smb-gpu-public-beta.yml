@@ -1,11 +1,11 @@
 # LOCAL VERIFIED INPUT: dependency artifact13411141574 from run42012066497;
 # outer/inner ZIP CRC, paths, provenance and inner SHA256 independently verified.
 # Maintained test link correction: reuse real GUI/crypto providers; preserve an app candidate before test compilation.
-name: QIDI combined SMB GPU maintained native contract validation
+name: QIDI PRIVATE CUDA API trace DIAGNOSTIC ONLY
 
 on:
   push:
-    branches: [ci/smb-gpu-public-beta-maintained]
+    branches: [diagnostic/cuda-api-trace-20261106]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +13,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: qidi-cuda-api-trace-DIAGNOSTIC-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -244,7 +244,9 @@ jobs:
           $source = (Get-Content SOURCE-COMMIT.txt -Raw).Trim()
           "https://github.com/$env:GITHUB_REPOSITORY/tree/$source" | Set-Content install-beta/SOURCE-URL.txt -Encoding ascii
           @'
-          QIDIStudio combined SMB/GPU account-free developer candidate.
+          QIDIStudio PRIVATE CUDA API TRACE DIAGNOSTIC; account-free mode0.
+          NEVER RELEASE OR MERGE UPSTREAM. Synchronous per-call stdout tracing perturbs timing.
+          API trace records are diagnostic boundaries, not unperturbed performance or driver-internal stack proof.
           Never a release artifact. VALIDATION-STATUS.txt records whether the selected maintained CI contracts have passed;
           hardware and complete-application validation remain unverified in either CI artifact.
           CPU is the runtime default. Explicitly select SLIC3R_GPU_BACKEND=cpu|cuda|vulkan|auto.
@@ -266,15 +268,15 @@ jobs:
             $lines | Set-Content "install-beta/Start-$mode.cmd" -Encoding ascii
           }
           @('@echo off','set "PATH=%~dp0;%PATH%"','"%~dp0diagnostics\gpu_exit_diagnostics.exe"','exit /b %errorlevel%') | Set-Content install-beta/Run-exit-diagnostics-test.cmd -Encoding ascii
-          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61.zip
-          $hash = (Get-FileHash QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61.zip" | Set-Content candidate-sha256.txt -Encoding ascii
+          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-UNVERIFIED-Windows-sm61.zip
+          $hash = (Get-FileHash QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-UNVERIFIED-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-UNVERIFIED-Windows-sm61.zip" | Set-Content candidate-sha256.txt -Encoding ascii
       - name: Preserve unverified compiled candidate even if later tests fail
         uses: actions/upload-artifact@v6
         with:
-          name: QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61
+          name: QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-UNVERIFIED-Windows-sm61
           path: |
-            QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61.zip
+            QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-UNVERIFIED-Windows-sm61.zip
             candidate-sha256.txt
           if-no-files-found: error
           retention-days: 14
@@ -347,14 +349,14 @@ jobs:
         shell: pwsh
         run: |
           'CI_STANDALONE_AND_FOUR_MAINTAINED_NATIVE_CONTRACTS_PASSED; legacy full-project suite unavailable; physical GPU, full app equivalence, profile-isolation runtime proof and release validation pending.' | Set-Content install-beta/VALIDATION-STATUS.txt -Encoding ascii
-          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61.zip
-          $hash = (Get-FileHash QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61.zip" | Set-Content package-sha256.txt -Encoding ascii
+          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-contracts-Windows-sm61.zip
+          $hash = (Get-FileHash QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-contracts-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-contracts-Windows-sm61.zip" | Set-Content package-sha256.txt -Encoding ascii
       - name: Retain build and test evidence on any outcome
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: qidi-maintained-gpu-app-evidence
+          name: qidi-cuda-api-trace-DIAGNOSTIC-evidence
           path: |
             SOURCE-COMMIT.txt
             SOURCE-TREE.txt
@@ -387,9 +389,9 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v6
         with:
-          name: QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61
+          name: QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-contracts-Windows-sm61
           path: |
-            QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61.zip
+            QIDIStudio-CUDA-API-TRACE-DIAGNOSTIC-contracts-Windows-sm61.zip
             package-sha256.txt
           if-no-files-found: error
           retention-days: 14
