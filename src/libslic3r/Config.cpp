@@ -1692,9 +1692,11 @@ bool DynamicConfig::read_cli(int argc, const char* const argv[], t_config_option
         token.erase(token.begin(), token.begin() + (boost::starts_with(token, "--") ? 2 : 1));
         // Read value when supplied in the --key=value form.
         std::string value;
+        bool value_supplied_with_equals = false;
         {
             size_t equals_pos = token.find("=");
             if (equals_pos != std::string::npos) {
+                value_supplied_with_equals = true;
                 value = token.substr(equals_pos+1);
                 token.erase(equals_pos);
             }
@@ -1726,7 +1728,10 @@ bool DynamicConfig::read_cli(int argc, const char* const argv[], t_config_option
 
         // If the option type expects a value and it was not already provided,
         // look for it in the next token.
-        if (value.empty() && optdef.type != coBool && optdef.type != coBools) {
+        // An empty scalar string after '=' is a value, not a missing argument.
+        // Keep the existing boolean and list parsing behavior.
+        const bool explicit_string_value = value_supplied_with_equals && optdef.type == coString;
+        if (value.empty() && !explicit_string_value && optdef.type != coBool && optdef.type != coBools) {
             if (i == argc-1) {
                 boost::nowide::cerr << "Need values for option --" << token.c_str() << std::endl;
                 return false;

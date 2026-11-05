@@ -1,0 +1,377 @@
+# LOCAL VERIFIED INPUT: dependency artifact13411141574 from run42012066497;
+# outer/inner ZIP CRC, paths, provenance and inner SHA256 independently verified.
+# Product arguments reviewed against combined local 81f91be829a2a9f2f51f09e08cd54d1f07c0da23.
+name: QIDI combined SMB GPU public developer app validation
+
+on:
+  push:
+    branches: [ci/smb-gpu-public-beta]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+  SLIC3R_GPU_BACKEND: cpu
+  QIDI_DEPENDENCY_RUN: '42012066497'
+  QIDI_DEPENDENCY_SOURCE: '59683fc132204b80e4d022a7d5d309ad66ba1151'
+  QIDI_DEPENDENCY_TREE: 'e197a5df6940e61f93d060e15d83e189c89a423a'
+  QIDI_DEPENDENCY_INNER_SHA256: '12cd963db15c2e7efdb944a7297dec554fa1bb83181acaa7f177e9bf3aa2a72c'
+
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ssrobins/install-cmake@v1
+        with:
+          version: 3.31.6
+      - name: Install Linux contract-only Boost headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y libboost-dev
+      - name: Verify Windows contract-only Boost headers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest 'https://archives.boost.io/release/1.84.0/source/boost_1_84_0.tar.gz' -OutFile boost-source.tar.gz
+          if ((Get-FileHash boost-source.tar.gz -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'a5800f405508f5df8114558ca9855d2640a2de8f0445f051fa1c7c3383045724') { throw 'Boost archive digest mismatch' }
+          tar -xzf boost-source.tar.gz
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "BOOST_ROOT=$pwd/boost_1_84_0" | Add-Content $env:GITHUB_ENV
+      - name: Configure hardware-independent contracts without GPU tools
+        run: cmake -S tests/gpu_safety -B build-contracts -DSLIC3R_ENABLE_CUDA_SLICER=OFF -DSLIC3R_ENABLE_VULKAN_SLICER=OFF
+      - name: Compile standalone contracts
+        run: cmake --build build-contracts --config Release --parallel 2
+      - name: Run all three standalone contracts
+        shell: pwsh
+        run: |
+          $listing = ctest --test-dir build-contracts -C Release --show-only=json-v1 | ConvertFrom-Json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $names = @($listing.tests | ForEach-Object name | Sort-Object)
+          if (($names -join ',') -ne 'gpu_cuda_accounting,gpu_exit_diagnostics,gpu_safety') { throw 'Unexpected standalone contract set' }
+          ctest --test-dir build-contracts -C Release --output-on-failure --output-junit "$pwd/contracts.xml"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Retain this source commit's Windows exit recorder fixture
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v6
+        with:
+          name: qidi-gpu-contract-windows
+          path: build-contracts/Release/gpu_exit_diagnostics.exe
+          if-no-files-found: error
+      - name: Retain standalone contract evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qidi-gpu-contract-evidence-${{ runner.os }}
+          path: |
+            contracts.xml
+            build-contracts/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+
+  windows-app:
+    needs: contracts
+    runs-on: windows-2022
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Record tracked source and dependency identity before generated paths
+        shell: pwsh
+        run: |
+          $source = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $tree = (git rev-parse 'HEAD^{tree}').Trim()
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $depsTree = (git rev-parse HEAD:deps).Trim()
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if ($depsTree -ne $env:QIDI_DEPENDENCY_TREE) { throw 'Tracked QIDI dependency manifest changed' }
+          if (Test-Path deps/pgLibConnect) { throw 'Mode-0 checkout must not contain private SDK files' }
+          $source | Set-Content SOURCE-COMMIT.txt -Encoding ascii
+          $tree | Set-Content SOURCE-TREE.txt -Encoding ascii
+          $depsTree | Set-Content DEPENDENCY-TREE.txt -Encoding ascii
+          'qidi-public-windows-2022-vs17-release-${{ hashFiles('deps/**') }}' | Set-Content PRODUCER-CACHE-KEY.txt -Encoding ascii
+          if ($env:QIDI_DEPENDENCY_INNER_SHA256 -notmatch '^[0-9a-f]{64}$') { throw 'STOP: independently verify and replace QIDI_DEPENDENCY_INNER_SHA256 before publishing/running this template' }
+      - uses: ssrobins/install-cmake@v1
+        with:
+          version: 3.31.6
+      - uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+      - name: Download exact QIDI dependency producer artifact
+        uses: actions/download-artifact@v6
+        with:
+          repository: mk0000001/QIDIStudio
+          run-id: ${{ env.QIDI_DEPENDENCY_RUN }}
+          name: qidi-windows-dependencies-e197a5df
+          github-token: ${{ github.token }}
+          path: dependency-artifact
+      - name: Verify dependency provenance and inner ZIP before extraction
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem dependency-artifact -Recurse -File -Filter QIDI-Windows-dependencies-e197a5df.zip)
+          $records = @(Get-ChildItem dependency-artifact -Recurse -File -Filter dependency-source.txt)
+          if ($archives.Count -ne 1 -or $records.Count -ne 1) { throw 'Expected one exact QIDI dependency ZIP and provenance record' }
+          $record = @((Get-Content -LiteralPath $records[0].FullName -Raw) -split '[\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+          if ($record.Count -lt 3 -or $record[0] -ne $env:QIDI_DEPENDENCY_SOURCE -or $record[1] -ne $env:QIDI_DEPENDENCY_TREE -or $record[2] -ne 'cmake version 3.31.6') { throw 'QIDI dependency producer/source/manifest/toolchain provenance mismatch' }
+          $digest = (Get-FileHash -LiteralPath $archives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne $env:QIDI_DEPENDENCY_INNER_SHA256) { throw 'QIDI dependency inner ZIP digest mismatch' }
+          "$digest  $($archives[0].Name)" | Set-Content dependency-archive-sha256.txt -Encoding ascii
+          Copy-Item -LiteralPath $records[0].FullName -Destination dependency-source-used.txt
+          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath .
+          $prefix = (Resolve-Path qidi-deps/usr/local).Path
+          if (-not (Test-Path "$prefix/lib") -or -not (Test-Path "$prefix/include")) { throw 'Dependency prefix is incomplete' }
+          # Both official Boost install layouts are valid. CMake FindBoost,
+          # rather than this preflight, selects the authoritative include path.
+          $boost = @()
+          if (Test-Path "$prefix/include/boost/version.hpp") { $boost += "$prefix/include/boost/version.hpp" }
+          $boost += @(Get-ChildItem "$prefix/include" -Directory -Filter 'boost-*' | ForEach-Object {
+            $header = Join-Path $_.FullName 'boost/version.hpp'
+            if (Test-Path $header) { $header }
+          })
+          if (-not $boost.Count) { throw 'Neither unversioned nor versioned Boost header layout exists' }
+          $boost | Set-Content dependency-boost-layout.txt
+          "QIDI_DEPS_PREFIX=$prefix" | Add-Content $env:GITHUB_ENV
+      - name: Download matching standalone recorder test
+        uses: actions/download-artifact@v6
+        with:
+          name: qidi-gpu-contract-windows
+          path: contract-tests
+      - name: Install existing non-GPU build utilities
+        run: choco install pkgconfiglite strawberryperl nsis --yes --no-progress
+      - name: Configure CPU OFF before installing CUDA or Vulkan tools
+        shell: pwsh
+        run: |
+          $sdk = (Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/Include' -Directory | Where-Object Name -Match '^10\.' | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          if (-not $sdk) { throw 'Windows 10 SDK headers are missing' }
+          "QIDI_WIN10SDK_PATH=$sdk" | Add-Content $env:GITHUB_ENV
+          cmake -S . -B build-cpu-off -G 'Visual Studio 17 2022' -A x64 -DQDT_RELEASE_TO_PUBLIC=0 -DQDT_INTERNAL_TESTING=0 -DSLIC3R_BUILD_TESTS=ON -DSLIC3R_ENABLE_CUDA_SLICER=OFF -DSLIC3R_ENABLE_VULKAN_SLICER=OFF -DSLIC3R_GPU_SELFTEST=OFF -DCMAKE_DISABLE_FIND_PACKAGE_CUDAToolkit=ON -DCMAKE_DISABLE_FIND_PACKAGE_Vulkan=ON "-DCMAKE_PREFIX_PATH=$env:QIDI_DEPS_PREFIX" "-DCMAKE_INSTALL_PREFIX=$pwd/install-cpu-off" -DCMAKE_BUILD_TYPE=Release "-DWIN10SDK_PATH=$sdk" *> cpu-off-configure.log
+          $result = $LASTEXITCODE
+          Get-Content cpu-off-configure.log -Tail 100
+          if ($result) { exit $result }
+          $cache = Get-Content build-cpu-off/CMakeCache.txt -Raw
+          if ($cache -notmatch 'SLIC3R_ENABLE_CUDA_SLICER:BOOL=OFF' -or $cache -notmatch 'SLIC3R_ENABLE_VULKAN_SLICER:BOOL=OFF' -or $cache -match '(?m)^CMAKE_CUDA_COMPILER:') { throw 'CPU-OFF configuration unexpectedly enabled a GPU language/backend' }
+          $boostLine = @(Select-String -Path build-cpu-off/CMakeCache.txt -Pattern '^Boost_INCLUDE_DIR:PATH=')
+          if ($boostLine.Count -ne 1) { throw 'FindBoost did not report one authoritative include directory' }
+          $include = ($boostLine[0].Line -split '=', 2)[1]
+          if (-not (Test-Path (Join-Path $include 'boost/version.hpp'))) { throw 'FindBoost include directory is invalid' }
+          $boostLine[0].Line | Set-Content cpu-off-findboost.txt
+          # No duplicate CPU app compile: the exact dependency producer runs
+          # the full developer CPU app/test build separately.
+      - name: Install Pascal-capable CUDA 12.9.1
+        uses: Jimver/cuda-toolkit@b8bf9c6c28f8a92fbb04dcfcaee872e60c57462d
+        with:
+          cuda: '12.9.1'
+          method: network
+          sub-packages: '["nvcc", "cudart", "visual_studio_integration"]'
+          use-github-cache: true
+          use-local-cache: true
+      - name: Install pinned Vulkan compiler and headers
+        run: choco install vulkan-sdk --version=1.4.363 --yes --no-progress
+      - name: Verify official Vulkan runtime components and record tools
+        shell: pwsh
+        run: |
+          $sdk = @(Get-ChildItem C:/VulkanSDK -Directory | Where-Object Name -Match '^1\.4\.363(\.|$)')
+          if ($sdk.Count -ne 1) { throw 'Expected one pinned Vulkan SDK 1.4.363' }
+          $vk = $sdk[0].FullName
+          "VULKAN_SDK=$vk" | Add-Content $env:GITHUB_ENV
+          "$vk/Bin" | Add-Content $env:GITHUB_PATH
+          nvcc --version | Tee-Object cuda-toolchain.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & "$vk/Bin/glslc.exe" --version | Tee-Object vulkan-toolchain.txt
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Invoke-WebRequest 'https://sdk.lunarg.com/sdk/download/1.4.363.0/windows/vulkan-runtime-components.zip' -OutFile vulkan-runtime-components.zip
+          if ((Get-FileHash vulkan-runtime-components.zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'a25a927aa8b9f0371048f1861cf88ac3b9bc9b1fb332c42d897c8ab32695769a') { throw 'Official Vulkan runtime digest mismatch' }
+          Expand-Archive -LiteralPath vulkan-runtime-components.zip -DestinationPath vulkan-runtime
+          $runtime = "$pwd/vulkan-runtime/VulkanRT-X64-1.4.363.0-Components"
+          foreach ($required in @('x64/vulkan-1.dll','VulkanRT-License.txt')) {
+            if (-not (Test-Path (Join-Path $runtime $required))) { throw "Vulkan runtime component missing: $required" }
+          }
+          "VULKAN_RUNTIME_COMPONENTS=$runtime" | Add-Content $env:GITHUB_ENV
+      - name: Configure actual CUDA sm61 and Vulkan QIDI developer app
+        shell: pwsh
+        run: |
+          cmake -S . -B build-gpu -G 'Visual Studio 17 2022' -A x64 -T "cuda=$env:CUDA_PATH" -DQDT_RELEASE_TO_PUBLIC=0 -DQDT_INTERNAL_TESTING=0 -DSLIC3R_BUILD_TESTS=ON -DSLIC3R_ENABLE_CUDA_SLICER=ON -DSLIC3R_ENABLE_VULKAN_SLICER=ON -DSLIC3R_GPU_SELFTEST=ON -DCMAKE_CUDA_ARCHITECTURES=61 "-DSLIC3R_VULKAN_RUNTIME_DLL=$env:VULKAN_RUNTIME_COMPONENTS/x64/vulkan-1.dll" "-DCMAKE_PREFIX_PATH=$env:QIDI_DEPS_PREFIX" "-DCMAKE_INSTALL_PREFIX=$pwd/install-beta" -DCMAKE_BUILD_TYPE=Release "-DWIN10SDK_PATH=$env:QIDI_WIN10SDK_PATH" *> gpu-configure.log
+          $result = $LASTEXITCODE
+          Get-Content gpu-configure.log -Tail 100
+          if ($result) { exit $result }
+      - name: Compile full application and native project tests then install
+        shell: pwsh
+        run: |
+          $log = Join-Path $pwd 'app-build.log'
+          cmake --build build-gpu --target ALL_BUILD --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger "/fileloggerparameters:logfile=$log;verbosity=minimal"
+          $result = $LASTEXITCODE
+          if (Test-Path $log) { Select-String -LiteralPath $log -Pattern 'error (C\d+|LNK\d+|MSB\d+)|fatal error' | ForEach-Object Line | Set-Content app-build-errors.txt }
+          if ($result) { exit $result }
+          cmake --install build-gpu --config Release *> app-install.log
+          $result = $LASTEXITCODE
+          Get-Content app-install.log -Tail 80
+          if ($result) { exit $result }
+      - name: Assemble compiled candidate before legacy test suites can fail
+        id: candidate
+        shell: pwsh
+        run: |
+          foreach ($required in @('qidi-studio.exe','QIDIStudio.dll','cudart64_12.dll','vulkan-1.dll','slic3r-gpu-compute-selftest.exe')) {
+            if (-not (Test-Path (Join-Path install-beta $required))) { throw "Portable developer component missing: $required" }
+          }
+          $private = @(Get-ChildItem install-beta -Recurse -File | Where-Object Name -Match '^(pgDllConnect|pgLibConnect)')
+          if ($private.Count) { throw 'Private pgLibConnect SDK/runtime must not be redistributed' }
+          $shaderNames = @(Get-ChildItem install-beta/resources/vulkan -File -Filter '*.spv' | ForEach-Object Name | Sort-Object)
+          $expectedShaders = @('perimeter_infill_candidates_64.spv','perimeter_infill_candidates_128.spv','perimeter_infill_candidates_256.spv','perimeter_infill_candidates_512.spv','perimeter_infill_candidates_1024.spv','tree_support_contour_candidates.spv') | Sort-Object
+          if (($shaderNames -join ',') -ne ($expectedShaders -join ',')) { throw 'Runtime shader set is incomplete' }
+          if (@(git status --porcelain --untracked-files=no).Count) { throw 'Tracked source changed during compilation' }
+          New-Item -ItemType Directory install-beta/diagnostics,install-beta/licenses -Force | Out-Null
+          foreach ($name in @('fff_print_tests.exe','libslic3r_tests.exe')) {
+            $test = @(Get-ChildItem build-gpu -Recurse -File -Filter $name)
+            if ($test.Count -ne 1) { throw "Missing or ambiguous native test executable: $name" }
+            Copy-Item -LiteralPath $test[0].FullName -Destination install-beta/diagnostics
+          }
+          Copy-Item contract-tests/gpu_exit_diagnostics.exe install-beta/diagnostics
+          Copy-Item LICENSE install-beta/licenses/LICENSE-AGPL-3.0.txt
+          $notices = @(Get-ChildItem "$env:CUDA_PATH" -File | Where-Object Name -Match 'LICENSE|EULA')
+          if (-not $notices.Count) { throw 'CUDA runtime license notices are missing' }
+          $notices | Copy-Item -Destination install-beta/licenses
+          Copy-Item "$env:VULKAN_RUNTIME_COMPONENTS/VulkanRT-License.txt" install-beta/licenses
+          Copy-Item SOURCE-COMMIT.txt install-beta
+          Copy-Item SOURCE-TREE.txt install-beta
+          Copy-Item dependency-source-used.txt install-beta/DEPENDENCIES-SOURCE.txt
+          Copy-Item dependency-archive-sha256.txt install-beta/DEPENDENCIES-SHA256.txt
+          $source = (Get-Content SOURCE-COMMIT.txt -Raw).Trim()
+          "https://github.com/$env:GITHUB_REPOSITORY/tree/$source" | Set-Content install-beta/SOURCE-URL.txt -Encoding ascii
+          @'
+          QIDIStudio combined SMB/GPU account-free developer candidate.
+          Never a release artifact. VALIDATION-STATUS.txt records whether CI project tests have passed;
+          hardware and complete-application validation remain unverified in either CI artifact.
+          CPU is the runtime default. Explicitly select SLIC3R_GPU_BACKEND=cpu|cuda|vulkan|auto.
+          CUDA12.9.1/sm61 supports Pascal. CUDA/Vulkan cover fully validated scanline arithmetic;
+          Vulkan alone adds conservative whole-contour-box tree broad phase. Exact CPU clipping remains authoritative.
+          Set SLIC3R_GPU_DIAGNOSTICS to an absolute local path for a normal-exit key=value report.
+          Private accounts, QIDI Maker, printer WebSocket/API, box sync and P2P features are unavailable in mode0.
+          Missing official private sources are not replaced. No vendor SDK or pgLibConnect runtime is included.
+          Hosted CI establishes neither physical-GPU dispatch, complete-app output equivalence nor speedup.
+          Native GTX1060 validation, complex-model matrix, original-profile isolation and performance checks remain separate gates.
+          Test binaries are retained for focused generated-fixture checks; older suites with compiled absolute test-data paths
+          may require their original source tree. The raw CI test reports remain authoritative.
+          This package's SOURCE-COMMIT.txt identifies actual CI application source; dependency source/digest are recorded separately.
+          '@ | Set-Content install-beta/DEVELOPER-BUILD-LIMITATIONS.txt -Encoding utf8
+          'UNVERIFIED_COMPILED_CANDIDATE; project tests not yet run; hardware and release validation pending.' | Set-Content install-beta/VALIDATION-STATUS.txt -Encoding ascii
+          foreach ($mode in @('cpu','cuda','vulkan','auto')) {
+            $lines = @('@echo off', "set SLIC3R_GPU_BACKEND=$mode", 'if not exist "%~dp0beta-profile" mkdir "%~dp0beta-profile"', 'if errorlevel 1 exit /b 1', 'start "" "%~dp0qidi-studio.exe" --datadir "%~dp0beta-profile"')
+            $lines | Set-Content "install-beta/Start-$mode.cmd" -Encoding ascii
+          }
+          @('@echo off','set "PATH=%~dp0;%PATH%"','"%~dp0diagnostics\gpu_exit_diagnostics.exe"','exit /b %errorlevel%') | Set-Content install-beta/Run-exit-diagnostics-test.cmd -Encoding ascii
+          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61.zip
+          $hash = (Get-FileHash QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61.zip" | Set-Content candidate-sha256.txt -Encoding ascii
+      - name: Preserve unverified compiled candidate even if later tests fail
+        uses: actions/upload-artifact@v6
+        with:
+          name: QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61
+          path: |
+            QIDIStudio-SMB-GPU-UNVERIFIED-COMPILED-Windows-sm61.zip
+            candidate-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Run focused native Fill tree and CLI parser cases in CPU mode
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
+          $env:SLIC3R_GPU_BACKEND = 'cpu'
+          $env:SLIC3R_GPU_TEST_RESOURCES = "$pwd/install-beta/resources"
+          & install-beta/diagnostics/fff_print_tests.exe '[Gpu]~[.gpu-hardware]' -r junit -o "$pwd/focused-fill-tree.xml"
+          $fill = $LASTEXITCODE
+          & install-beta/diagnostics/libslic3r_tests.exe '[CLI]' -r junit -o "$pwd/cli-datadir-tests.xml"
+          $cli = $LASTEXITCODE
+          if ($fill -or $cli) { throw "Focused native tests failed: Fill/tree=$fill CLI=$cli" }
+          [xml]$fillReport = Get-Content focused-fill-tree.xml -Raw
+          [xml]$cliReport = Get-Content cli-datadir-tests.xml -Raw
+          if (@($fillReport.SelectNodes('//testcase')).Count -lt 3 -or @($cliReport.SelectNodes('//testcase')).Count -lt 5) { throw 'Focused filters did not execute the expected Fill/tree and CLI cases' }
+      - name: Run full registered project CTest with CPU backend
+        if: success() || (failure() && steps.candidate.outcome == 'success')
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
+          $env:SLIC3R_GPU_BACKEND = 'cpu'
+          $env:SLIC3R_GPU_TEST_RESOURCES = "$pwd/install-beta/resources"
+          ctest --test-dir build-gpu -C Release --output-on-failure --parallel 2 --no-tests=error --output-junit "$pwd/full-project-tests.xml"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify CPU selftest exit diagnostics without GPU work
+        if: success() || (failure() && steps.candidate.outcome == 'success')
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
+          $env:SLIC3R_GPU_BACKEND = 'cpu'
+          $env:SLIC3R_GPU_DIAGNOSTICS = "$pwd/cpu-GPU 진단.txt"
+          & install-beta/slic3r-gpu-compute-selftest.exe "$pwd/install-beta/resources/vulkan" cpu
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Remove-Item Env:SLIC3R_GPU_DIAGNOSTICS
+          $summary = @{}
+          foreach ($line in Get-Content -LiteralPath 'cpu-GPU 진단.txt') {
+            $parts = $line -split '=', 2
+            if ($parts.Count -ne 2 -or $summary.ContainsKey($parts[0])) { throw 'Malformed or duplicate CPU exit report key' }
+            $summary[$parts[0]] = $parts[1]
+          }
+          $counters = @('vertical_submitted','vertical_accepted','vertical_full_checks','vertical_failures','queue_submissions','tree_submissions','tree_submitted_branches','tree_contour_boxes','tree_validated_branches','tree_negative_branches','tree_failures')
+          $keys = @('schema','environment_backend','requested_backend','active_backend','device','backend_reason') + $counters
+          if ($summary.Count -ne $keys.Count -or @($keys | Where-Object { -not $summary.ContainsKey($_) }).Count) { throw 'Incomplete or unknown CPU exit report schema' }
+          if ($summary.schema -ne '1' -or $summary.environment_backend -ne 'cpu' -or $summary.requested_backend -ne 'cpu' -or $summary.active_backend -ne 'CPU') { throw 'CPU exit mode/schema mismatch' }
+          foreach ($key in $counters) { if ($summary[$key] -ne '0') { throw "CPU selftest recorded GPU work/failures: $key" } }
+      - name: Final CI test gate and package
+        if: success()
+        shell: pwsh
+        run: |
+          'CI_CONTRACTS_AND_NATIVE_CPU_TESTS_PASSED; physical GPU, full app equivalence, profile-isolation runtime proof and release validation remain pending.' | Set-Content install-beta/VALIDATION-STATUS.txt -Encoding ascii
+          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61.zip
+          $hash = (Get-FileHash QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61.zip" | Set-Content package-sha256.txt -Encoding ascii
+      - name: Retain build and test evidence on any outcome
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qidi-combined-gpu-app-evidence
+          path: |
+            SOURCE-COMMIT.txt
+            SOURCE-TREE.txt
+            DEPENDENCY-TREE.txt
+            PRODUCER-CACHE-KEY.txt
+            dependency-source-used.txt
+            dependency-archive-sha256.txt
+            dependency-boost-layout.txt
+            cpu-off-configure.log
+            cpu-off-findboost.txt
+            gpu-configure.log
+            app-build.log
+            app-build-errors.txt
+            app-install.log
+            cuda-toolchain.txt
+            vulkan-toolchain.txt
+            candidate-sha256.txt
+            package-sha256.txt
+            focused-fill-tree.xml
+            cli-datadir-tests.xml
+            full-project-tests.xml
+            cpu-GPU 진단.txt
+            build-cpu-off/CMakeCache.txt
+            build-gpu/CMakeCache.txt
+            build-gpu/Testing/Temporary/LastTest.log
+          if-no-files-found: warn
+      - name: Retain only CI-gated beta separately from the unverified candidate
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61
+          path: |
+            QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61.zip
+            package-sha256.txt
+          if-no-files-found: error
+          retention-days: 14

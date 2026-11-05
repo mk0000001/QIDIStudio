@@ -8444,8 +8444,6 @@ bool CLI::setup(int argc, char **argv)
         for (const t_optiondef_map::value_type &optdef : *options)
             m_config.option(optdef.first, true);
 
-    //set_data_dir(m_config.opt_string("datadir"));
-
     //FIXME Validating at this stage most likely does not make sense, as the config is not fully initialized yet.
     if (!validity.empty()) {
         boost::nowide::cerr << "Params in command line error: "<< std::endl;
@@ -8453,6 +8451,11 @@ bool CLI::setup(int argc, char **argv)
             boost::nowide::cerr << it->first <<": "<< it->second << std::endl;
         return false;
     }
+
+    // Apply an explicit profile directory before GUI/configuration/log setup.
+    // Leave the existing default-directory selection unchanged when omitted.
+    if (m_config.has("datadir") && !m_config.opt_string("datadir").empty())
+        set_data_dir(boost::filesystem::absolute(m_config.opt_string("datadir")).make_preferred().string());
 
     return true;
 }
