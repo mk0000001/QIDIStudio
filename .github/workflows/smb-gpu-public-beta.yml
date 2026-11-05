@@ -1,11 +1,11 @@
 # LOCAL VERIFIED INPUT: dependency artifact13411141574 from run42012066497;
 # outer/inner ZIP CRC, paths, provenance and inner SHA256 independently verified.
-# Product arguments reviewed against combined local 5dee3f75b876fe4cf10d6562c8fee0bc126f531e.
-name: QIDI combined SMB GPU public developer app validation
+# Product arguments reviewed against combined local 0c093c709ccb611b4887f0a2ebfbb47ef2b306ba.
+name: QIDI combined SMB GPU maintained native contract validation
 
 on:
   push:
-    branches: [ci/smb-gpu-public-beta-fill-fixture]
+    branches: [ci/smb-gpu-public-beta-maintained]
   workflow_dispatch:
 
 permissions:
@@ -205,11 +205,11 @@ jobs:
           $result = $LASTEXITCODE
           Get-Content gpu-configure.log -Tail 100
           if ($result) { exit $result }
-      - name: Compile full application and native project tests then install
+      - name: Compile full application and maintained native contracts then install
         shell: pwsh
         run: |
           $log = Join-Path $pwd 'app-build.log'
-          cmake --build build-gpu --target ALL_BUILD --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger "/fileloggerparameters:logfile=$log;verbosity=minimal"
+          cmake --build build-gpu --target QIDIStudio_app_gui QIDIStudio_app_console slic3r-gpu-compute-selftest qidi_gpu_geometry_tests qidi_beta_regression_tests gpu_rectilinear_candidate_tests gpu_tree_candidate_tests --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger "/fileloggerparameters:logfile=$log;verbosity=minimal"
           $result = $LASTEXITCODE
           if (Test-Path $log) { Select-String -LiteralPath $log -Pattern 'error (C\d+|LNK\d+|MSB\d+)|fatal error' | ForEach-Object Line | Set-Content app-build-errors.txt }
           if ($result) { exit $result }
@@ -217,7 +217,7 @@ jobs:
           $result = $LASTEXITCODE
           Get-Content app-install.log -Tail 80
           if ($result) { exit $result }
-      - name: Assemble compiled candidate before legacy test suites can fail
+      - name: Assemble unverified compiled candidate before maintained contract tests
         id: candidate
         shell: pwsh
         run: |
@@ -231,7 +231,7 @@ jobs:
           if (($shaderNames -join ',') -ne ($expectedShaders -join ',')) { throw 'Runtime shader set is incomplete' }
           if (@(git status --porcelain --untracked-files=no).Count) { throw 'Tracked source changed during compilation' }
           New-Item -ItemType Directory install-beta/diagnostics,install-beta/licenses -Force | Out-Null
-          foreach ($name in @('fff_print_tests.exe','libslic3r_tests.exe')) {
+          foreach ($name in @('qidi_gpu_geometry_tests.exe','qidi_beta_regression_tests.exe')) {
             $test = @(Get-ChildItem build-gpu -Recurse -File -Filter $name)
             if ($test.Count -ne 1) { throw "Missing or ambiguous native test executable: $name" }
             Copy-Item -LiteralPath $test[0].FullName -Destination install-beta/diagnostics
@@ -250,7 +250,7 @@ jobs:
           "https://github.com/$env:GITHUB_REPOSITORY/tree/$source" | Set-Content install-beta/SOURCE-URL.txt -Encoding ascii
           @'
           QIDIStudio combined SMB/GPU account-free developer candidate.
-          Never a release artifact. VALIDATION-STATUS.txt records whether CI project tests have passed;
+          Never a release artifact. VALIDATION-STATUS.txt records whether the selected maintained CI contracts have passed;
           hardware and complete-application validation remain unverified in either CI artifact.
           CPU is the runtime default. Explicitly select SLIC3R_GPU_BACKEND=cpu|cuda|vulkan|auto.
           CUDA12.9.1/sm61 supports Pascal. CUDA/Vulkan cover fully validated scanline arithmetic;
@@ -260,11 +260,12 @@ jobs:
           Missing official private sources are not replaced. No vendor SDK or pgLibConnect runtime is included.
           Hosted CI establishes neither physical-GPU dispatch, complete-app output equivalence nor speedup.
           Native GTX1060 validation, complex-model matrix, original-profile isolation and performance checks remain separate gates.
-          Test binaries are retained for focused generated-fixture checks; older suites with compiled absolute test-data paths
-          may require their original source tree. The raw CI test reports remain authoritative.
+          Test binaries retain actual exact/preflight, Fill/tree, CLI and recent-project contracts.
+          Legacy project suites remain registered but are unavailable here due to recorded upstream API compilation failures.
+          This workflow does not compile or claim a passing full-project legacy test suite. Raw CI reports remain authoritative.
           This package's SOURCE-COMMIT.txt identifies actual CI application source; dependency source/digest are recorded separately.
           '@ | Set-Content install-beta/DEVELOPER-BUILD-LIMITATIONS.txt -Encoding utf8
-          'UNVERIFIED_COMPILED_CANDIDATE; project tests not yet run; hardware and release validation pending.' | Set-Content install-beta/VALIDATION-STATUS.txt -Encoding ascii
+          'UNVERIFIED_COMPILED_CANDIDATE; maintained contracts not yet run; legacy project suite unavailable; hardware and release validation pending.' | Set-Content install-beta/VALIDATION-STATUS.txt -Encoding ascii
           foreach ($mode in @('cpu','cuda','vulkan','auto')) {
             $lines = @('@echo off', "set SLIC3R_GPU_BACKEND=$mode", 'if not exist "%~dp0beta-profile" mkdir "%~dp0beta-profile"', 'if errorlevel 1 exit /b 1', 'start "" "%~dp0qidi-studio.exe" --datadir "%~dp0beta-profile"')
             $lines | Set-Content "install-beta/Start-$mode.cmd" -Encoding ascii
@@ -288,22 +289,28 @@ jobs:
           $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
           $env:SLIC3R_GPU_BACKEND = 'cpu'
           $env:SLIC3R_GPU_TEST_RESOURCES = "$pwd/install-beta/resources"
-          & install-beta/diagnostics/fff_print_tests.exe '[Gpu]~[.gpu-hardware]' -r junit -o "$pwd/focused-fill-tree.xml"
+          & install-beta/diagnostics/qidi_gpu_geometry_tests.exe '[Gpu]~[.gpu-hardware]' -r junit -o "$pwd/focused-fill-tree.xml"
           $fill = $LASTEXITCODE
-          & install-beta/diagnostics/libslic3r_tests.exe '[CLI]' -r junit -o "$pwd/cli-datadir-tests.xml"
+          & install-beta/diagnostics/qidi_beta_regression_tests.exe '[CLI]' -r junit -o "$pwd/cli-datadir-tests.xml"
           $cli = $LASTEXITCODE
           if ($fill -or $cli) { throw "Focused native tests failed: Fill/tree=$fill CLI=$cli" }
           [xml]$fillReport = Get-Content focused-fill-tree.xml -Raw
           [xml]$cliReport = Get-Content cli-datadir-tests.xml -Raw
           if (@($fillReport.SelectNodes('//testcase')).Count -lt 3 -or @($cliReport.SelectNodes('//testcase')).Count -lt 5) { throw 'Focused filters did not execute the expected Fill/tree and CLI cases' }
-      - name: Run full registered project CTest with CPU backend
+      - name: Run exactly four maintained CTest targets with CPU backend
         if: success() || (failure() && steps.candidate.outcome == 'success')
         shell: pwsh
         run: |
           $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
           $env:SLIC3R_GPU_BACKEND = 'cpu'
           $env:SLIC3R_GPU_TEST_RESOURCES = "$pwd/install-beta/resources"
-          ctest --test-dir build-gpu -C Release --output-on-failure --parallel 2 --no-tests=error --output-junit "$pwd/full-project-tests.xml"
+          $selection = '^(qidi_gpu_geometry_tests|qidi_beta_regression_tests|gpu_rectilinear_candidate_tests|gpu_tree_candidate_tests)$'
+          $listing = ctest --test-dir build-gpu -C Release -R $selection --show-only=json-v1 | ConvertFrom-Json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $expected = @('qidi_gpu_geometry_tests','qidi_beta_regression_tests','gpu_rectilinear_candidate_tests','gpu_tree_candidate_tests') | Sort-Object
+          $actual = @($listing.tests | ForEach-Object name | Sort-Object)
+          if (($actual -join ',') -ne ($expected -join ',')) { throw 'Unexpected maintained native CTest selection' }
+          ctest --test-dir build-gpu -C Release -R $selection --output-on-failure --parallel 2 --no-tests=error --output-junit "$pwd/maintained-project-tests.xml"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify CPU selftest exit diagnostics without GPU work
         if: success() || (failure() && steps.candidate.outcome == 'success')
@@ -311,12 +318,12 @@ jobs:
         run: |
           $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
           $env:SLIC3R_GPU_BACKEND = 'cpu'
-          $env:SLIC3R_GPU_DIAGNOSTICS = "$pwd/cpu-GPU 진단.txt"
+          $env:SLIC3R_GPU_DIAGNOSTICS = "$pwd/cpu-GPU 吏꾨떒.txt"
           & install-beta/slic3r-gpu-compute-selftest.exe "$pwd/install-beta/resources/vulkan" cpu
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Remove-Item Env:SLIC3R_GPU_DIAGNOSTICS
           $summary = @{}
-          foreach ($line in Get-Content -LiteralPath 'cpu-GPU 진단.txt') {
+          foreach ($line in Get-Content -LiteralPath 'cpu-GPU 吏꾨떒.txt') {
             $parts = $line -split '=', 2
             if ($parts.Count -ne 2 -or $summary.ContainsKey($parts[0])) { throw 'Malformed or duplicate CPU exit report key' }
             $summary[$parts[0]] = $parts[1]
@@ -330,15 +337,15 @@ jobs:
         if: success()
         shell: pwsh
         run: |
-          'CI_CONTRACTS_AND_NATIVE_CPU_TESTS_PASSED; physical GPU, full app equivalence, profile-isolation runtime proof and release validation remain pending.' | Set-Content install-beta/VALIDATION-STATUS.txt -Encoding ascii
-          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61.zip
-          $hash = (Get-FileHash QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61.zip" | Set-Content package-sha256.txt -Encoding ascii
+          'CI_STANDALONE_AND_FOUR_MAINTAINED_NATIVE_CONTRACTS_PASSED; legacy full-project suite unavailable; physical GPU, full app equivalence, profile-isolation runtime proof and release validation pending.' | Set-Content install-beta/VALIDATION-STATUS.txt -Encoding ascii
+          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61.zip
+          $hash = (Get-FileHash QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61.zip" | Set-Content package-sha256.txt -Encoding ascii
       - name: Retain build and test evidence on any outcome
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: qidi-combined-gpu-app-evidence
+          name: qidi-maintained-gpu-app-evidence
           path: |
             SOURCE-COMMIT.txt
             SOURCE-TREE.txt
@@ -359,19 +366,20 @@ jobs:
             package-sha256.txt
             focused-fill-tree.xml
             cli-datadir-tests.xml
-            full-project-tests.xml
-            cpu-GPU 진단.txt
+            maintained-project-tests.xml
+            cpu-GPU 吏꾨떒.txt
             build-cpu-off/CMakeCache.txt
             build-gpu/CMakeCache.txt
             build-gpu/Testing/Temporary/LastTest.log
           if-no-files-found: warn
-      - name: Retain only CI-gated beta separately from the unverified candidate
+      - name: Retain maintained-contract-gated beta separately from unverified candidate
         if: success()
         uses: actions/upload-artifact@v6
         with:
-          name: QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61
+          name: QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61
           path: |
-            QIDIStudio-SMB-GPU-public-beta-CI-tested-Windows-sm61.zip
+            QIDIStudio-SMB-GPU-maintained-contracts-Windows-sm61.zip
             package-sha256.txt
           if-no-files-found: error
           retention-days: 14
+
