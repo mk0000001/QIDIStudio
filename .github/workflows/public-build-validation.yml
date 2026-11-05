@@ -48,7 +48,7 @@ jobs:
           $tree = (git rev-parse HEAD:deps).Trim()
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           if ($tree -ne 'e197a5df6940e61f93d060e15d83e189c89a423a') { throw 'Unexpected QIDI dependency manifest; update artifact contract deliberately' }
-          if (-not (Test-Path qidi-deps/usr/local/include/boost/version.hpp)) { throw 'Dependency prefix is missing' }
+          if (-not (Test-Path qidi-deps/usr/local/include/boost/version.hpp) -and -not (Test-Path qidi-deps/usr/local/include/boost-1_84/boost/version.hpp)) { throw 'Dependency Boost headers are missing' }
           git rev-parse HEAD | Set-Content dependency-source.txt
           $tree | Add-Content dependency-source.txt
           cmake --version | Add-Content dependency-source.txt
@@ -107,14 +107,18 @@ jobs:
       - name: Compile application and project tests
         shell: pwsh
         run: |
-          cmake --build build-public --target install --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger '/fileloggerparameters:logfile=app-build.log;verbosity=minimal'
+          cmake --build build-public --target install --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger "/fileloggerparameters:logfile=$pwd/app-build.log;verbosity=minimal"
           $buildResult = $LASTEXITCODE
           if (Test-Path app-build.log) {
             Select-String -Path app-build.log -Pattern 'error (C\d+|LNK\d+|MSB\d+)|fatal error' | ForEach-Object Line | Set-Content app-build-errors.txt
           }
           exit $buildResult
       - name: Run project tests
-        run: ctest --test-dir build-public -C Release --output-on-failure --parallel 2
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd/install-public;$pwd/qidi-deps/usr/local/bin;$pwd/qidi-deps/usr/local/bin/occt;$env:PATH"
+          ctest --test-dir build-public -C Release --output-on-failure --parallel 2
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Package developer app with limitations
         shell: pwsh
         run: |
