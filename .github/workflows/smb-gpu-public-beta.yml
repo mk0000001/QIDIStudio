@@ -1,6 +1,6 @@
 # LOCAL VERIFIED INPUT: dependency artifact13411141574 from run42012066497;
 # outer/inner ZIP CRC, paths, provenance and inner SHA256 independently verified.
-# Product arguments reviewed against combined local 0c093c709ccb611b4887f0a2ebfbb47ef2b306ba.
+# Maintained test link correction: reuse real GUI/crypto providers; preserve an app candidate before test compilation.
 name: QIDI combined SMB GPU maintained native contract validation
 
 on:
@@ -205,11 +205,11 @@ jobs:
           $result = $LASTEXITCODE
           Get-Content gpu-configure.log -Tail 100
           if ($result) { exit $result }
-      - name: Compile full application and maintained native contracts then install
+      - name: Compile full application and selftest then install before test compilation
         shell: pwsh
         run: |
           $log = Join-Path $pwd 'app-build.log'
-          cmake --build build-gpu --target QIDIStudio_app_gui QIDIStudio_app_console slic3r-gpu-compute-selftest qidi_gpu_geometry_tests qidi_beta_regression_tests gpu_rectilinear_candidate_tests gpu_tree_candidate_tests --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger "/fileloggerparameters:logfile=$log;verbosity=minimal"
+          cmake --build build-gpu --target QIDIStudio_app_gui QIDIStudio_app_console slic3r-gpu-compute-selftest --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger "/fileloggerparameters:logfile=$log;verbosity=minimal"
           $result = $LASTEXITCODE
           if (Test-Path $log) { Select-String -LiteralPath $log -Pattern 'error (C\d+|LNK\d+|MSB\d+)|fatal error' | ForEach-Object Line | Set-Content app-build-errors.txt }
           if ($result) { exit $result }
@@ -231,11 +231,6 @@ jobs:
           if (($shaderNames -join ',') -ne ($expectedShaders -join ',')) { throw 'Runtime shader set is incomplete' }
           if (@(git status --porcelain --untracked-files=no).Count) { throw 'Tracked source changed during compilation' }
           New-Item -ItemType Directory install-beta/diagnostics,install-beta/licenses -Force | Out-Null
-          foreach ($name in @('qidi_gpu_geometry_tests.exe','qidi_beta_regression_tests.exe')) {
-            $test = @(Get-ChildItem build-gpu -Recurse -File -Filter $name)
-            if ($test.Count -ne 1) { throw "Missing or ambiguous native test executable: $name" }
-            Copy-Item -LiteralPath $test[0].FullName -Destination install-beta/diagnostics
-          }
           Copy-Item contract-tests/gpu_exit_diagnostics.exe install-beta/diagnostics
           Copy-Item LICENSE install-beta/licenses/LICENSE-AGPL-3.0.txt
           $notices = @(Get-ChildItem "$env:CUDA_PATH" -File | Where-Object Name -Match 'LICENSE|EULA')
@@ -260,7 +255,7 @@ jobs:
           Missing official private sources are not replaced. No vendor SDK or pgLibConnect runtime is included.
           Hosted CI establishes neither physical-GPU dispatch, complete-app output equivalence nor speedup.
           Native GTX1060 validation, complex-model matrix, original-profile isolation and performance checks remain separate gates.
-          Test binaries retain actual exact/preflight, Fill/tree, CLI and recent-project contracts.
+          Maintained exact/preflight, Fill/tree, CLI and recent-project test binaries are added only after their separate build succeeds.
           Legacy project suites remain registered but are unavailable here due to recorded upstream API compilation failures.
           This workflow does not compile or claim a passing full-project legacy test suite. Raw CI reports remain authoritative.
           This package's SOURCE-COMMIT.txt identifies actual CI application source; dependency source/digest are recorded separately.
@@ -283,6 +278,20 @@ jobs:
             candidate-sha256.txt
           if-no-files-found: error
           retention-days: 14
+      - name: Compile maintained native contracts against the actual application dependencies
+        id: maintained_build
+        shell: pwsh
+        run: |
+          $log = Join-Path $pwd 'maintained-build.log'
+          cmake --build build-gpu --target qidi_gpu_geometry_tests qidi_beta_regression_tests gpu_rectilinear_candidate_tests gpu_tree_candidate_tests --config Release --parallel 2 -- /consoleloggerparameters:ErrorsOnly /filelogger "/fileloggerparameters:logfile=$log;verbosity=minimal"
+          $result = $LASTEXITCODE
+          if (Test-Path $log) { Select-String -LiteralPath $log -Pattern 'error (C\d+|LNK\d+|MSB\d+)|fatal error' | ForEach-Object Line | Set-Content maintained-build-errors.txt }
+          if ($result) { exit $result }
+          foreach ($name in @('qidi_gpu_geometry_tests.exe','qidi_beta_regression_tests.exe')) {
+            $test = @(Get-ChildItem build-gpu -Recurse -File -Filter $name)
+            if ($test.Count -ne 1) { throw "Missing or ambiguous native test executable: $name" }
+            Copy-Item -LiteralPath $test[0].FullName -Destination install-beta/diagnostics
+          }
       - name: Run focused native Fill tree and CLI parser cases in CPU mode
         shell: pwsh
         run: |
@@ -298,7 +307,7 @@ jobs:
           [xml]$cliReport = Get-Content cli-datadir-tests.xml -Raw
           if (@($fillReport.SelectNodes('//testcase')).Count -lt 3 -or @($cliReport.SelectNodes('//testcase')).Count -lt 5) { throw 'Focused filters did not execute the expected Fill/tree and CLI cases' }
       - name: Run exactly four maintained CTest targets with CPU backend
-        if: success() || (failure() && steps.candidate.outcome == 'success')
+        if: success() || (failure() && steps.maintained_build.outcome == 'success')
         shell: pwsh
         run: |
           $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
@@ -359,6 +368,8 @@ jobs:
             gpu-configure.log
             app-build.log
             app-build-errors.txt
+            maintained-build.log
+            maintained-build-errors.txt
             app-install.log
             cuda-toolchain.txt
             vulkan-toolchain.txt
