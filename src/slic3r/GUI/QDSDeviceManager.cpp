@@ -44,8 +44,10 @@
 #include "../QIDI/P2PManager.hpp"
 #endif
 
+#if QDT_RELEASE_TO_PUBLIC
 #include "../QIDI/QIDIDeviceApi.hpp"
 #include "../QIDI/QIDIFileManager.hpp"
+#endif
 
 //cj_2
 #include <wx/image.h>
@@ -1375,6 +1377,7 @@ const std::vector<char>& get_monitor_placeholder_png()
 } // namespace
 
 QDSDeviceManager::QDSDeviceManager() {
+#if QDT_RELEASE_TO_PUBLIC
     m_ws = std::make_unique<QIDIDeviceWebSocket>();
     // Route websocket events back into the manager's device-state logic.
     m_ws->on_status_changed = [this](const std::string& device_id, const std::string& status) {
@@ -1386,6 +1389,7 @@ QDSDeviceManager::QDSDeviceManager() {
         handleDeviceMessage(device_id, message);
     };
 
+#endif
     health_check_running_ = true;
     health_check_thread_ = std::thread(&QDSDeviceManager::healthCheckLoop, this);
 
@@ -1588,7 +1592,12 @@ std::shared_ptr<QDSDevice> QDSDeviceManager::getSelectedDevice(){
 }
 
 void QDSDeviceManager::stopConnection(const std::string& device_id) {
+#if QDT_RELEASE_TO_PUBLIC
     m_ws->stopConnection(device_id);
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+#endif
 }
 
 
@@ -1660,40 +1669,84 @@ bool QDSDeviceManager::removeDevice(const std::string& device_id) {
 }
 
 bool QDSDeviceManager::connectDevice(const std::string device_id) {
+#if QDT_RELEASE_TO_PUBLIC
     return m_ws->connect(device_id, getDevice(device_id));
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+    return false;
+#endif
 }
 
 bool QDSDeviceManager::disconnectDevice(const std::string& device_id) {
+#if QDT_RELEASE_TO_PUBLIC
     stopConnection(device_id);
     return true;
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+    return false;
+#endif
 }
 
 
 
 
 void QDSDeviceManager::sendSubscribeMessage(const std::string& device_id) {
+#if QDT_RELEASE_TO_PUBLIC
     m_ws->sendSubscribeMessage(device_id);
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+#endif
 }
 
 void QDSDeviceManager::getAllErrorList(const std::string& device_id) {
+#if QDT_RELEASE_TO_PUBLIC
     m_ws->getAllErrorList(device_id);
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+#endif
 }
 
 void QDSDeviceManager::sendCommand(const std::string& device_id, const std::string& script) {
+#if QDT_RELEASE_TO_PUBLIC
     m_ws->sendCommand(device_id, script);
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+#endif
 }
 
 bool QDSDeviceManager::sendCommand(const std::string& device_id, const std::string& scriptName, const std::string& script, const std::string& method) {
+#if QDT_RELEASE_TO_PUBLIC
     return m_ws->sendCommand(device_id, scriptName, script, method);
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+    return false;
+#endif
 }
 
 //y84
 bool QDSDeviceManager::sendCommand(const std::string& device_id, const json& params, const std::string& method) {
+#if QDT_RELEASE_TO_PUBLIC
     return m_ws->sendCommand(device_id, params, method);
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+    return false;
+#endif
 }
 
 void QDSDeviceManager::sendActionCommand(const std::string& device_id, const std::string& action_type) {
+#if QDT_RELEASE_TO_PUBLIC
     m_ws->sendActionCommand(device_id, action_type);
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+#endif
 }
 
 void QDSDeviceManager::handleDeviceMessage(const std::string& device_id, const json& message) {
@@ -2248,6 +2301,7 @@ void QDSDeviceManager::processConnectionStatus(const std::string& device_id,
 }
 
 void QDSDeviceManager::stopAllConnection() {
+#if QDT_RELEASE_TO_PUBLIC
     std::vector<std::string> device_ids = m_ws->getConnectionIds();
     if (device_ids.empty()) return;
 
@@ -2259,6 +2313,11 @@ void QDSDeviceManager::stopAllConnection() {
         std::lock_guard<std::mutex> lock(manager_mutex_);
         devices_.clear();
     }
+
+#else
+    std::lock_guard<std::mutex> lock(manager_mutex_);
+    devices_.clear();
+#endif
 }
 
 std::string QDSDeviceManager::getDeviceTempNozzle(const std::string& deviceId)
@@ -2723,6 +2782,7 @@ void QDSDeviceManager::fetchTimelapseThumbnailsP2P(std::shared_ptr<QDSDevice> de
 
 //y84
 void QDSDeviceManager::getFileInfo(const std::string& device_id){
+#if QDT_RELEASE_TO_PUBLIC
     std::shared_ptr<QDSDevice> device = getDevice(device_id);
     const uint64_t gen = device ? (++device->m_file_gen) : 0;
 
@@ -2903,6 +2963,17 @@ void QDSDeviceManager::getFileInfo(const std::string& device_id){
             }
         }
     });
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+    auto device = getDevice(device_id);
+    if (device) {
+        device->m_file_info_load_failed = true;
+        device->m_timelapse_info_load_failed = true;
+    }
+    auto callback = getFileInfoUpdateCallback();
+    if (callback) callback(device_id);
+#endif
 }
 
 //cj_3 y84
@@ -3041,6 +3112,7 @@ void QDSDeviceManager::resetBoxUpdateStatus(const std::string& device_id) {
 
 //y84
 void QDSDeviceManager::getDeviceInfo(const std::string& device_id){
+#if QDT_RELEASE_TO_PUBLIC
     new std::thread([this, device_id]() {
         std::shared_ptr<QDSDevice> device = getDevice(device_id);
         if (!device) {
@@ -3090,6 +3162,10 @@ void QDSDeviceManager::getDeviceInfo(const std::string& device_id){
         }
 
     });
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+#endif
 }
 
 }}

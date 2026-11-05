@@ -11,7 +11,9 @@
 #include "../QIDI/QIDINetwork.hpp"
 #endif
 
+#if QDT_RELEASE_TO_PUBLIC
 #include "../QIDI/QIDIDeviceApi.hpp"
+#endif
 #include <wx/listimpl.cpp>
 
 #include "DeviceCore/DevManager.h"
@@ -1879,11 +1881,16 @@ void SendMultiMachinePage::on_timer(wxTimerEvent& event)
 
 //y61
 void SendMultiMachinePage::StartThread() {
+#if QDT_RELEASE_TO_PUBLIC
     if (m_statusThread.joinable()) {
         return;
     }
     m_stopThread = false;
     m_statusThread = std::thread(&SendMultiMachinePage::ThreadWorker, this);
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+#endif
 }
 
 void SendMultiMachinePage::StopThread() {
@@ -1896,6 +1903,7 @@ void SendMultiMachinePage::StopThread() {
 }
 
 void SendMultiMachinePage::ThreadWorker() {
+#if QDT_RELEASE_TO_PUBLIC
     QIDIDeviceApi qidi;
     wxString msg = "";
     while (!m_stopThread) {
@@ -1907,6 +1915,10 @@ void SendMultiMachinePage::ThreadWorker() {
             temp_obj->ams_exist_bits = qidi.get_box_state(msg, temp_obj->dev_url, temp_obj->dev_apikey) ? 1 : 0;
         }
     }
+
+#else
+    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__ << ": printer communication is unavailable in this developer build.";
+#endif
 }
 
 void SendMultiMachinePage::OnClose(wxCloseEvent& event)

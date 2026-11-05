@@ -694,8 +694,12 @@ function(qidistudio_copy_dlls target config postfix output_dlls)
     file(COPY ${TOP_LEVEL_PROJECT_DIR}/deps/GMP/gmp/lib/${_gmpdll}
             ${TOP_LEVEL_PROJECT_DIR}/deps/MPFR/mpfr/lib/${_mpfrdll}
             ${TOP_LEVEL_PROJECT_DIR}/deps/WebView2/lib/${_webviewloaderdll}
-            ${TOP_LEVEL_PROJECT_DIR}/deps/pgLibConnect/Bin/pgDllConnect.dll
         DESTINATION ${_out_dir})
+
+    if(QDT_RELEASE_TO_PUBLIC)
+        file(COPY ${TOP_LEVEL_PROJECT_DIR}/deps/pgLibConnect/Bin/pgDllConnect.dll
+            DESTINATION ${_out_dir})
+    endif()
 
     file(COPY ${CMAKE_PREFIX_PATH}/bin/occt/TKBO.dll
             ${CMAKE_PREFIX_PATH}/bin/occt/TKBRep.dll

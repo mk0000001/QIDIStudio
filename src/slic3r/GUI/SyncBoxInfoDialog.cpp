@@ -32,7 +32,9 @@
 #include "../QIDI/QIDINetwork.hpp"
 #endif
 
+#if QDT_RELEASE_TO_PUBLIC
 #include "../QIDI/QIDIDeviceApi.hpp"
+#endif
 using namespace Slic3r;
 using namespace Slic3r::GUI;
 
@@ -3407,6 +3409,7 @@ void GetBoxInfoDialog::on_dpi_changed(const wxRect &suggested_rect)
 
 void GetBoxInfoDialog::synchronization(wxCommandEvent &event)
 {
+#if QDT_RELEASE_TO_PUBLIC
     int selected_idx = m_comboBox_printer->GetSelection();
     std::string printer_ip = m_printer_ip[selected_idx];
     std::string printer_url = m_printer_url[selected_idx];
@@ -3437,8 +3440,13 @@ void GetBoxInfoDialog::synchronization(wxCommandEvent &event)
             wxGetApp().app_config->set("machine_list_net", "0");
         this->EndModal(wxID_OK);
     }
+
+#else
+    WarningDialog(this, _L("Printer filament synchronization is unavailable in this developer build.")).ShowModal();
+#endif
 }
 
+#if QDT_RELEASE_TO_PUBLIC
 void GetBoxInfoDialog::generate_filament_id(GUI::Box_info& machine_filament_info)
 {
     std::string filament_id = "QD";
@@ -3462,7 +3470,9 @@ void GetBoxInfoDialog::generate_filament_id(GUI::Box_info& machine_filament_info
         machine_filament_info.filament_id.back() = temp_ext_filament_id;
     }
 }
+#endif
 
+#if QDT_RELEASE_TO_PUBLIC
 void GetBoxInfoDialog::update_filament_info(GUI::Box_info& machine_filament_info)
 {
     m_plater->box_msg.slot_state = std::move(machine_filament_info.slot_state);
@@ -3475,6 +3485,7 @@ void GetBoxInfoDialog::update_filament_info(GUI::Box_info& machine_filament_info
     std::string preset_name_box = wxGetApp().get_tab(Preset::TYPE_PRINTER)->get_presets()->get_edited_preset().name;
     m_plater->box_msg.box_list_preset_name = preset_name_box;
 }
+#endif
 
 void GetBoxInfoDialog::cancel(wxCommandEvent &event)
 {

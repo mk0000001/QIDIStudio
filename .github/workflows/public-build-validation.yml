@@ -1,0 +1,107 @@
+name: QIDI public developer build validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/public-build-validation]
+
+permissions:
+  contents: read
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: '2'
+
+jobs:
+  windows-public-build:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: '[17.0,18.0)'
+      - uses: ssrobins/install-cmake@v1
+        with:
+          version: 3.31.6
+      - name: Install build utilities
+        run: choco install pkgconfiglite strawberryperl nsis --yes --no-progress
+      - name: Cache QIDI-specific dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: qidi-deps
+          key: qidi-public-windows-2022-vs17-release-${{ hashFiles('deps/**') }}
+      - name: Configure QIDI dependencies
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          cmake -S deps -B build-deps -G 'Visual Studio 17 2022' -A x64 "-DDESTDIR=$pwd/qidi-deps" -DCMAKE_BUILD_TYPE=Release -DDEP_DEBUG=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Build QIDI dependencies from this repository manifest
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: cmake --build build-deps --config Release --parallel 2
+      - name: Capture baseline missing-source failure
+        shell: pwsh
+        run: |
+          git worktree add --detach baseline-public-build 21d47457919212b8af3f97705716c261b97be559
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $sdkBase = 'https://raw.githubusercontent.com/QIDITECH/QIDIStudio/c58fdc56629005395a672cb4e8713018a087df1b/deps/pgLibConnect/'
+          $sdkFiles = @{
+            'Bin/pgDllConnect.dll' = '5faccca6a68b789a2dd330574ec44c7693d901e04aa879f597f0013cb430ff5d'
+            'Include/pgLibConnect.h' = '386ed96f4ed5c619ec8b92eac063ec0062b63365f2646068cf81c8d72c92d8de'
+            'Lib/Windows/pgDllConnect.lib' = '424ffd43adb8d2a28352af74866758c0436ac345387735c1d3b6ef7637193b0d'
+          }
+          foreach ($relative in $sdkFiles.Keys) {
+            $destination = Join-Path "$pwd/baseline-public-build/deps/pgLibConnect" $relative
+            New-Item -ItemType Directory -Path (Split-Path $destination) -Force | Out-Null
+            Invoke-WebRequest -Uri ($sdkBase + $relative) -OutFile $destination
+            if ((Get-FileHash $destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sdkFiles[$relative]) { throw "SDK hash mismatch: $relative" }
+          }
+          $sdk = (Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/Include' -Directory |
+            Where-Object Name -Match '^10\.' | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          cmake -S baseline-public-build -B build-baseline -G 'Visual Studio 17 2022' -A x64 -DQDT_RELEASE_TO_PUBLIC=0 -DQDT_INTERNAL_TESTING=0 "-DCMAKE_PREFIX_PATH=$pwd/qidi-deps/usr/local" "-DCMAKE_INSTALL_PREFIX=$pwd/baseline-install" -DCMAKE_BUILD_TYPE=Release "-DWIN10SDK_PATH=$sdk" *> baseline-configure.log
+          $baselineResult = $LASTEXITCODE
+          Get-Content baseline-configure.log -Tail 100
+          if ($baselineResult -eq 0) { throw 'Unexpected baseline configure success: update regression evidence' }
+          if (-not (Select-String -Path baseline-configure.log -SimpleMatch 'UserPresetSyncManager.cpp' -Quiet)) { throw 'Baseline failed before expected missing-source regression; inspect baseline-configure.log' }
+          exit 0
+      - name: Configure developer application without private SDK
+        shell: pwsh
+        run: |
+          $sdk = (Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/Include' -Directory |
+            Where-Object Name -Match '^10\.' | Sort-Object Name -Descending | Select-Object -First 1).FullName
+          cmake -S . -B build-public -G 'Visual Studio 17 2022' -A x64 -DQDT_RELEASE_TO_PUBLIC=0 -DQDT_INTERNAL_TESTING=0 -DSLIC3R_BUILD_TESTS=ON "-DCMAKE_PREFIX_PATH=$pwd/qidi-deps/usr/local" "-DCMAKE_INSTALL_PREFIX=$pwd/install-public" -DCMAKE_BUILD_TYPE=Release "-DWIN10SDK_PATH=$sdk"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Compile application and project tests
+        run: cmake --build build-public --target install --config Release --parallel 2
+      - name: Run project tests
+        run: ctest --test-dir build-public -C Release --output-on-failure --parallel 2
+      - name: Package developer app with limitations
+        shell: pwsh
+        run: |
+          @'
+          QIDIStudio account-free developer build.
+          Private QIDI account, printer WebSocket/API, box synchronization and P2P upload features are unavailable.
+          This package does not provide official-feature parity and does not claim GPU acceleration.
+          Source: ${{ github.sha }}
+          '@ | Set-Content install-public/DEVELOPER-BUILD-LIMITATIONS.txt
+          Compress-Archive -Path install-public -DestinationPath QIDIStudio-public-developer-Windows-x64.zip
+          Get-FileHash QIDIStudio-public-developer-Windows-x64.zip -Algorithm SHA256 | Format-List | Out-File package-sha256.txt
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qidi-public-build-evidence
+          path: |
+            baseline-configure.log
+            build-public/Testing/Temporary/LastTest.log
+            package-sha256.txt
+          if-no-files-found: warn
+      - name: Upload successful developer application
+        uses: actions/upload-artifact@v6
+        with:
+          name: QIDIStudio-public-developer-Windows-x64
+          path: QIDIStudio-public-developer-Windows-x64.zip
+
