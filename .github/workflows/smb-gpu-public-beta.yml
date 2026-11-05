@@ -1,11 +1,11 @@
 # LOCAL VERIFIED INPUT: dependency artifact13411141574 from run42012066497;
 # outer/inner ZIP CRC, paths, provenance and inner SHA256 independently verified.
-# Product arguments reviewed against combined local 81f91be829a2a9f2f51f09e08cd54d1f07c0da23.
+# Product arguments reviewed against combined local 5dee3f75b876fe4cf10d6562c8fee0bc126f531e.
 name: QIDI combined SMB GPU public developer app validation
 
 on:
   push:
-    branches: [ci/smb-gpu-public-beta]
+    branches: [ci/smb-gpu-public-beta-fill-fixture]
   workflow_dispatch:
 
 permissions:
