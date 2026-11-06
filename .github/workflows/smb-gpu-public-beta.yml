@@ -1,11 +1,11 @@
 # LOCAL VERIFIED INPUT: dependency artifact13411141574 from run42012066497;
 # outer/inner ZIP CRC, paths, provenance and inner SHA256 independently verified.
 # Maintained test link correction: reuse real GUI/crypto providers; preserve an app candidate before test compilation.
-name: QIDI combined SMB GPU maintained native contract validation
+name: qidi experimental CUDA buffer reuse combined validation
 
 on:
   push:
-    branches: [ci/smb-gpu-public-beta-maintained]
+    branches: [ci/qidi-cuda-reuse-combined-20261106]
   workflow_dispatch:
 
 permissions:
@@ -61,6 +61,15 @@ jobs:
           if (($names -join ',') -ne 'gpu_cuda_accounting,gpu_exit_diagnostics,gpu_safety') { throw 'Unexpected standalone contract set' }
           ctest --test-dir build-contracts -C Release --output-on-failure --output-junit "$pwd/contracts.xml"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Validate 145 assertions in all 17 CUDA buffer host contract cases
+        shell: pwsh
+        run: |
+          $test = @(Get-ChildItem build-contracts -Recurse -File | Where-Object { $_.Name -in @('gpu_safety_tests','gpu_safety_tests.exe') })
+          if ($test.Count -ne 1) { throw 'Missing or ambiguous standalone GPU safety test executable' }
+          & $test[0].FullName '[CudaDispatchBuffers]' --reporter xml --out "$pwd/cuda-dispatch-buffers-contract.xml"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python .github/gpu-validation/check_cuda_buffer_results.py --xml cuda-dispatch-buffers-contract.xml --source tests/libslic3r/test_cuda_dispatch_buffers.cpp
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Retain this source commit's Windows exit recorder fixture
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v6
@@ -75,6 +84,7 @@ jobs:
           name: qidi-gpu-contract-evidence-${{ runner.os }}
           path: |
             contracts.xml
+            cuda-dispatch-buffers-contract.xml
             build-contracts/Testing/Temporary/LastTest.log
           if-no-files-found: warn
 
@@ -292,6 +302,16 @@ jobs:
             if ($test.Count -ne 1) { throw "Missing or ambiguous native test executable: $name" }
             Copy-Item -LiteralPath $test[0].FullName -Destination install-beta/diagnostics
           }
+      - name: Validate CUDA buffer contracts in actual maintained application target
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
+          $env:SLIC3R_GPU_BACKEND = 'cpu'
+          $env:SLIC3R_GPU_TEST_RESOURCES = "$pwd/install-beta/resources"
+          & install-beta/diagnostics/qidi_gpu_geometry_tests.exe '[CudaDispatchBuffers]' --reporter xml --out "$pwd/cuda-dispatch-buffers-app.xml"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python .github/gpu-validation/check_cuda_buffer_results.py --xml cuda-dispatch-buffers-app.xml --source tests/libslic3r/test_cuda_dispatch_buffers.cpp
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Run focused native Fill tree and CLI parser cases in CPU mode
         shell: pwsh
         run: |
@@ -376,6 +396,7 @@ jobs:
             candidate-sha256.txt
             package-sha256.txt
             focused-fill-tree.xml
+            cuda-dispatch-buffers-app.xml
             cli-datadir-tests.xml
             maintained-project-tests.xml
             cpu-GPU 吏꾨떒.txt
