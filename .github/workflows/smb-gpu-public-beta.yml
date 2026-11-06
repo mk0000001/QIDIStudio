@@ -5,7 +5,7 @@ name: qidi cache result and enum combined validation
 
 on:
   push:
-    branches: [ci/qidi-cache-result-enum-20261106]
+    branches: [ci/qidi-cache-result-enum-20261106, ci/startup-control-qidi-2ff-20261106]
   workflow_dispatch:
 
 permissions:
@@ -304,6 +304,33 @@ jobs:
             if ($test.Count -ne 1) { throw "Missing or ambiguous native test executable: $name" }
             Copy-Item -LiteralPath $test[0].FullName -Destination install-beta/diagnostics
           }
+      - name: Package complete compiled startup control before maintained tests
+        shell: pwsh
+        run: |
+          foreach ($name in @('qidi_gpu_geometry_tests.exe','qidi_beta_regression_tests.exe','gpu_rectilinear_candidate_tests.exe','gpu_tree_candidate_tests.exe')) {
+            $test = @(Get-ChildItem build-gpu -Recurse -File -Filter $name)
+            if ($test.Count -ne 1) { throw "Missing or ambiguous compiled test executable: $name" }
+            Copy-Item -LiteralPath $test[0].FullName -Destination install-beta/diagnostics
+          }
+          foreach ($required in @('qidi-studio.exe','QIDIStudio.dll','slic3r-gpu-compute-selftest.exe','cudart64_12.dll','vulkan-1.dll','SOURCE-COMMIT.txt','SOURCE-TREE.txt','DEPENDENCIES-SOURCE.txt','DEPENDENCIES-SHA256.txt','licenses/LICENSE-AGPL-3.0.txt')) {
+            if (-not (Test-Path -LiteralPath "install-beta/$required" -PathType Leaf)) { throw "Compiled pretest candidate missing: $required" }
+          }
+          if ((Get-Content install-beta/SOURCE-COMMIT.txt -Raw).Trim() -ne (git rev-parse HEAD).Trim()) { throw 'Compiled pretest source identity differs' }
+          if ((Get-Content install-beta/SOURCE-TREE.txt -Raw).Trim() -ne (git rev-parse 'HEAD^{tree}').Trim()) { throw 'Compiled pretest source tree differs' }
+          if (@(git status --porcelain --untracked-files=no).Count) { throw 'Tracked source changed before compiled pretest package' }
+          'UNQUALIFIED_COMPLETE_PRETEST_STARTUP_CONTROL; app and four selected maintained test targets compiled; tests not yet run; legacy project suites unavailable; hardware, GUI, startup performance and release qualification pending.' | Set-Content install-beta/VALIDATION-STATUS.txt -Encoding ascii
+          Compress-Archive -Path install-beta -DestinationPath QIDIStudio-STARTUP-CONTROL-UNQUALIFIED-COMPLETE-PRETEST-Windows-sm61.zip
+          $hash = (Get-FileHash QIDIStudio-STARTUP-CONTROL-UNQUALIFIED-COMPLETE-PRETEST-Windows-sm61.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  QIDIStudio-STARTUP-CONTROL-UNQUALIFIED-COMPLETE-PRETEST-Windows-sm61.zip" | Set-Content complete-pretest-sha256.txt -Encoding ascii
+      - name: Preserve complete unqualified startup control before maintained tests
+        uses: actions/upload-artifact@v6
+        with:
+          name: QIDIStudio-STARTUP-CONTROL-UNQUALIFIED-COMPLETE-PRETEST-Windows-sm61
+          path: |
+            QIDIStudio-STARTUP-CONTROL-UNQUALIFIED-COMPLETE-PRETEST-Windows-sm61.zip
+            complete-pretest-sha256.txt
+          if-no-files-found: error
+          retention-days: 14
       - name: Validate CUDA buffer contracts in actual maintained application target
         shell: pwsh
         run: |
@@ -423,6 +450,7 @@ jobs:
             cuda-toolchain.txt
             vulkan-toolchain.txt
             candidate-sha256.txt
+            complete-pretest-sha256.txt
             package-sha256.txt
             focused-fill-tree.xml
             cuda-dispatch-buffers-app.xml
