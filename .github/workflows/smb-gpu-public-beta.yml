@@ -1,11 +1,11 @@
 # LOCAL VERIFIED INPUT: dependency artifact13411141574 from run42012066497;
 # outer/inner ZIP CRC, paths, provenance and inner SHA256 independently verified.
 # Maintained test link correction: reuse real GUI/crypto providers; preserve an app candidate before test compilation.
-name: qidi experimental CUDA buffer reuse combined validation
+name: qidi cache result and enum combined validation
 
 on:
   push:
-    branches: [ci/qidi-cuda-reuse-combined-20261106]
+    branches: [ci/qidi-cache-result-enum-20261106]
   workflow_dispatch:
 
 permissions:
@@ -33,6 +33,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+      - name: Validate CPU regression XML gate with host-only boundary tests
+        run: python .github/gpu-validation/test_cpu_regression_results.py
       - uses: ssrobins/install-cmake@v1
         with:
           version: 3.31.6
@@ -312,6 +314,33 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python .github/gpu-validation/check_cuda_buffer_results.py --xml cuda-dispatch-buffers-app.xml --source tests/libslic3r/test_cuda_dispatch_buffers.cpp
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Validate focused cache enum and optional-result CPU regressions
+        shell: pwsh
+        run: |
+          $env:PATH = "$pwd/install-beta;$env:QIDI_DEPS_PREFIX/bin;$env:QIDI_DEPS_PREFIX/bin/occt;$env:CUDA_PATH/bin;$env:PATH"
+          $env:SLIC3R_GPU_BACKEND = 'cpu'
+          $env:SLIC3R_GPU_TEST_RESOURCES = "$pwd/install-beta/resources"
+          $contracts = @(
+            @{ Kind='cache'; Filter='[PresetIncludeDiffCache]'; Source='tests/libslic3r/test_preset_include_diff_cache.cpp' },
+            @{ Kind='enum'; Filter='[EnumMaps]'; Source='tests/libslic3r/test_config_enum_maps.cpp' },
+            @{ Kind='guard'; Filter='[OptionalResult]'; Source='tests/gpu_geometry/test_gcode_optional_result.cpp' }
+          )
+          $failed = $false
+          foreach ($contract in $contracts) {
+            $prefix = "cpu-$($contract.Kind)-regression"
+            & install-beta/diagnostics/qidi_beta_regression_tests.exe $contract.Filter --reporter xml --out "$pwd/$prefix.xml"
+            $nativeExit = $LASTEXITCODE
+            "$nativeExit" | Set-Content "$prefix-exit-code.txt" -Encoding ascii
+            python .github/gpu-validation/check_cpu_regression_results.py --kind $contract.Kind --source $contract.Source --xml "$prefix.xml" --exit-code $nativeExit > "$prefix-check.json" 2> "$prefix-check.log"
+            $gateExit = $LASTEXITCODE
+            Get-Content "$prefix-check.json"
+            if ($nativeExit -ne 0 -or $gateExit -ne 0) {
+              Get-Content "$prefix-check.log"
+              Write-Host "CPU contract $($contract.Kind) failed: native=$nativeExit gate=$gateExit"
+              $failed = $true
+            }
+          }
+          if ($failed) { throw 'One or more focused CPU regression contracts failed; original reports retained' }
       - name: Run focused native Fill tree and CLI parser cases in CPU mode
         shell: pwsh
         run: |
@@ -398,6 +427,18 @@ jobs:
             focused-fill-tree.xml
             cuda-dispatch-buffers-app.xml
             cli-datadir-tests.xml
+            cpu-cache-regression.xml
+            cpu-cache-regression-check.json
+            cpu-cache-regression-check.log
+            cpu-cache-regression-exit-code.txt
+            cpu-enum-regression.xml
+            cpu-enum-regression-check.json
+            cpu-enum-regression-check.log
+            cpu-enum-regression-exit-code.txt
+            cpu-guard-regression.xml
+            cpu-guard-regression-check.json
+            cpu-guard-regression-check.log
+            cpu-guard-regression-exit-code.txt
             maintained-project-tests.xml
             cpu-GPU 吏꾨떒.txt
             build-cpu-off/CMakeCache.txt
